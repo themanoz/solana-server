@@ -239,7 +239,13 @@ async fn main() {
         .route("/send/sol", post(send_sol))
         .route("/send/token", post(send_token));
 
-    println!("🚀 Solana API server running at http://0.0.0.0:3000");
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+   let port = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
+
+    let addr = format!("0.0.0.0:{}", port);
+    println!("Solana API server running at http://{}", addr);
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
