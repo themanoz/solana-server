@@ -1,25 +1,22 @@
 // main.rs
 
-use axum::{
-    routing::post,
-    Router,
-    Json,
-    http::StatusCode,
-    response::IntoResponse,
+use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
+use base64;
+use bs58;
+use ed25519_dalek::{
+    Keypair as DalekKeypair, PUBLIC_KEY_LENGTH, PublicKey as DalekPubkey,
+    Signature as DalekSignature, Signer as DalekSigner, Verifier,
 };
-use serde::{Serialize, Deserialize}; 
+use serde::{Deserialize, Serialize};
 use solana_sdk::{
-    pubkey::Pubkey,
-    signer::{keypair::Keypair, Signer},
     instruction::Instruction,
+    pubkey::Pubkey,
+    signer::{Signer, keypair::Keypair},
     system_instruction,
 };
-use spl_token::instruction::{initialize_mint, mint_to, transfer as spl_transfer};
 use spl_token::id as spl_token_program_id;
-use bs58;
-use base64;
+use spl_token::instruction::{initialize_mint, mint_to, transfer as spl_transfer};
 use std::str::FromStr;
-use ed25519_dalek::{Signer as DalekSigner, Verifier, Keypair as DalekKeypair, PublicKey as DalekPubkey, Signature as DalekSignature, PUBLIC_KEY_LENGTH};
 
 #[derive(Serialize)]
 struct ApiResponse<T> {
@@ -32,10 +29,18 @@ struct ApiResponse<T> {
 
 impl<T: Serialize> ApiResponse<T> {
     fn ok(data: T) -> Self {
-        Self { success: true, data: Some(data), error: None }
+        Self {
+            success: true,
+            data: Some(data),
+            error: None,
+        }
     }
     fn err(msg: &str) -> Self {
-        Self { success: false, data: None, error: Some(msg.to_string()) }
+        Self {
+            success: false,
+            data: None,
+            error: Some(msg.to_string()),
+        }
     }
 }
 
@@ -76,19 +81,31 @@ struct InstructionData {
 }
 
 async fn create_token(Json(payload): Json<CreateTokenRequest>) -> ApiResult<InstructionData> {
-    let mint = Pubkey::from_str(&payload.mint).map_err(|_| Json(ApiResponse::err("Invalid mint pubkey")))?;
-    let authority = Pubkey::from_str(&payload.mintAuthority).map_err(|_| Json(ApiResponse::err("Invalid authority pubkey")))?;
+    let mint = Pubkey::from_str(&payload.mint)
+        .map_err(|_| Json(ApiResponse::err("Invalid mint pubkey")))?;
+    let authority = Pubkey::from_str(&payload.mintAuthority)
+        .map_err(|_| Json(ApiResponse::err("Invalid authority pubkey")))?;
 
-    let instr = initialize_mint(&spl_token_program_id(), &mint, &authority, None, payload.decimals)
-        .map_err(|e| Json(ApiResponse::err(&format!("Instruction error: {e}"))))?;
+    let instr = initialize_mint(
+        &spl_token_program_id(),
+        &mint,
+        &authority,
+        None,
+        payload.decimals,
+    )
+    .map_err(|e| Json(ApiResponse::err(&format!("Instruction error: {e}"))))?;
 
     Ok(Json(ApiResponse::ok(InstructionData {
         program_id: instr.program_id.to_string(),
-        accounts: instr.accounts.iter().map(|a| AccountMetaInfo {
-            pubkey: a.pubkey.to_string(),
-            is_signer: a.is_signer,
-            is_writable: a.is_writable,
-        }).collect(),
+        accounts: instr
+            .accounts
+            .iter()
+            .map(|a| AccountMetaInfo {
+                pubkey: a.pubkey.to_string(),
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            })
+            .collect(),
         instruction_data: base64::encode(&instr.data),
     })))
 }
@@ -102,20 +119,34 @@ struct MintTokenRequest {
 }
 
 async fn mint_token(Json(payload): Json<MintTokenRequest>) -> ApiResult<InstructionData> {
-    let mint = Pubkey::from_str(&payload.mint).map_err(|_| Json(ApiResponse::err("Invalid mint pubkey")))?;
-    let dest = Pubkey::from_str(&payload.destination).map_err(|_| Json(ApiResponse::err("Invalid destination pubkey")))?;
-    let auth = Pubkey::from_str(&payload.authority).map_err(|_| Json(ApiResponse::err("Invalid authority pubkey")))?;
+    let mint = Pubkey::from_str(&payload.mint)
+        .map_err(|_| Json(ApiResponse::err("Invalid mint pubkey")))?;
+    let dest = Pubkey::from_str(&payload.destination)
+        .map_err(|_| Json(ApiResponse::err("Invalid destination pubkey")))?;
+    let auth = Pubkey::from_str(&payload.authority)
+        .map_err(|_| Json(ApiResponse::err("Invalid authority pubkey")))?;
 
-    let instr = mint_to(&spl_token_program_id(), &mint, &dest, &auth, &[], payload.amount)
-        .map_err(|e| Json(ApiResponse::err(&format!("Instruction error: {e}"))))?;
+    let instr = mint_to(
+        &spl_token_program_id(),
+        &mint,
+        &dest,
+        &auth,
+        &[],
+        payload.amount,
+    )
+    .map_err(|e| Json(ApiResponse::err(&format!("Instruction error: {e}"))))?;
 
     Ok(Json(ApiResponse::ok(InstructionData {
         program_id: instr.program_id.to_string(),
-        accounts: instr.accounts.iter().map(|a| AccountMetaInfo {
-            pubkey: a.pubkey.to_string(),
-            is_signer: a.is_signer,
-            is_writable: a.is_writable,
-        }).collect(),
+        accounts: instr
+            .accounts
+            .iter()
+            .map(|a| AccountMetaInfo {
+                pubkey: a.pubkey.to_string(),
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            })
+            .collect(),
         instruction_data: base64::encode(&instr.data),
     })))
 }
@@ -134,8 +165,11 @@ struct SignMessageData {
 }
 
 async fn sign_message(Json(payload): Json<SignMessageRequest>) -> ApiResult<SignMessageData> {
-    let secret_bytes = bs58::decode(&payload.secret).into_vec().map_err(|_| Json(ApiResponse::err("Invalid secret")))?;
-    let keypair = DalekKeypair::from_bytes(&secret_bytes).map_err(|_| Json(ApiResponse::err("Invalid secret bytes")))?;
+    let secret_bytes = bs58::decode(&payload.secret)
+        .into_vec()
+        .map_err(|_| Json(ApiResponse::err("Invalid secret")))?;
+    let keypair = DalekKeypair::from_bytes(&secret_bytes)
+        .map_err(|_| Json(ApiResponse::err("Invalid secret bytes")))?;
     let sig = keypair.sign(payload.message.as_bytes());
 
     Ok(Json(ApiResponse::ok(SignMessageData {
@@ -160,10 +194,15 @@ struct VerifyMessageData {
 }
 
 async fn verify_message(Json(payload): Json<VerifyMessageRequest>) -> ApiResult<VerifyMessageData> {
-    let pubkey_bytes = bs58::decode(&payload.pubkey).into_vec().map_err(|_| Json(ApiResponse::err("Invalid pubkey")))?;
-    let sig_bytes = base64::decode(&payload.signature).map_err(|_| Json(ApiResponse::err("Invalid signature")))?;
-    let pubkey = DalekPubkey::from_bytes(&pubkey_bytes).map_err(|_| Json(ApiResponse::err("Invalid pubkey bytes")))?;
-    let sig = DalekSignature::from_bytes(&sig_bytes).map_err(|_| Json(ApiResponse::err("Invalid signature bytes")))?;
+    let pubkey_bytes = bs58::decode(&payload.pubkey)
+        .into_vec()
+        .map_err(|_| Json(ApiResponse::err("Invalid pubkey")))?;
+    let sig_bytes = base64::decode(&payload.signature)
+        .map_err(|_| Json(ApiResponse::err("Invalid signature")))?;
+    let pubkey = DalekPubkey::from_bytes(&pubkey_bytes)
+        .map_err(|_| Json(ApiResponse::err("Invalid pubkey bytes")))?;
+    let sig = DalekSignature::from_bytes(&sig_bytes)
+        .map_err(|_| Json(ApiResponse::err("Invalid signature bytes")))?;
 
     let valid = pubkey.verify(payload.message.as_bytes(), &sig).is_ok();
 
@@ -189,14 +228,19 @@ struct SendSolData {
 }
 
 async fn send_sol(Json(payload): Json<SendSolRequest>) -> ApiResult<SendSolData> {
-    let from = Pubkey::from_str(&payload.from).map_err(|_| Json(ApiResponse::err("Invalid from")))?;
+    let from =
+        Pubkey::from_str(&payload.from).map_err(|_| Json(ApiResponse::err("Invalid from")))?;
     let to = Pubkey::from_str(&payload.to).map_err(|_| Json(ApiResponse::err("Invalid to")))?;
 
     let instr = system_instruction::transfer(&from, &to, payload.lamports);
 
     Ok(Json(ApiResponse::ok(SendSolData {
         program_id: instr.program_id.to_string(),
-        accounts: instr.accounts.iter().map(|a| a.pubkey.to_string()).collect(),
+        accounts: instr
+            .accounts
+            .iter()
+            .map(|a| a.pubkey.to_string())
+            .collect(),
         instruction_data: base64::encode(&instr.data),
     })))
 }
@@ -210,20 +254,34 @@ struct SendTokenRequest {
 }
 
 async fn send_token(Json(payload): Json<SendTokenRequest>) -> ApiResult<InstructionData> {
-    let mint = Pubkey::from_str(&payload.mint).map_err(|_| Json(ApiResponse::err("Invalid mint")))?;
-    let dest = Pubkey::from_str(&payload.destination).map_err(|_| Json(ApiResponse::err("Invalid destination")))?;
-    let owner = Pubkey::from_str(&payload.owner).map_err(|_| Json(ApiResponse::err("Invalid owner")))?;
+    let mint =
+        Pubkey::from_str(&payload.mint).map_err(|_| Json(ApiResponse::err("Invalid mint")))?;
+    let dest = Pubkey::from_str(&payload.destination)
+        .map_err(|_| Json(ApiResponse::err("Invalid destination")))?;
+    let owner =
+        Pubkey::from_str(&payload.owner).map_err(|_| Json(ApiResponse::err("Invalid owner")))?;
 
-    let instr = spl_transfer(&spl_token_program_id(), &mint, &dest, &owner, &[], payload.amount)
-        .map_err(|e| Json(ApiResponse::err(&format!("Instruction error: {e}"))))?;
+    let instr = spl_transfer(
+        &spl_token_program_id(),
+        &mint,
+        &dest,
+        &owner,
+        &[],
+        payload.amount,
+    )
+    .map_err(|e| Json(ApiResponse::err(&format!("Instruction error: {e}"))))?;
 
     Ok(Json(ApiResponse::ok(InstructionData {
         program_id: instr.program_id.to_string(),
-        accounts: instr.accounts.iter().map(|a| AccountMetaInfo {
-            pubkey: a.pubkey.to_string(),
-            is_signer: a.is_signer,
-            is_writable: a.is_writable,
-        }).collect(),
+        accounts: instr
+            .accounts
+            .iter()
+            .map(|a| AccountMetaInfo {
+                pubkey: a.pubkey.to_string(),
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            })
+            .collect(),
         instruction_data: base64::encode(&instr.data),
     })))
 }
@@ -239,13 +297,11 @@ async fn main() {
         .route("/send/sol", post(send_sol))
         .route("/send/token", post(send_token));
 
-   let port = std::env::var("PORT")
+    let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(3000);
-
     let addr = format!("0.0.0.0:{}", port);
-    println!("Solana API server running at http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
